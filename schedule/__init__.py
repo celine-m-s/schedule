@@ -68,6 +68,7 @@ class Scheduler(object):
     handle their execution.
     """
     def __init__(self):
+        self.recurrence = None
         self.jobs = []
 
     def run_pending(self):
@@ -132,10 +133,25 @@ class Scheduler(object):
         :return: An unconfigured :class:`Job <Job>`
         """
         job = Job(interval, self)
+        self.recurrence = 'every'
+        return job
+
+    def once(self, interval=1):
+        """
+        Schedule a new periodic job.
+        :param interval: A quantity of a certain time unit
+        :return: An unconfigured :class:`Job <Job>`
+        """
+        job = CustomJob(interval, self)
+        self.recurrence = 'once'
         return job
 
     def _run_job(self, job):
         ret = job.run()
+        
+        if self.recurrence == 'once':
+            job.scheduled = False
+        
         if isinstance(ret, CancelJob) or ret is CancelJob:
             self.cancel_job(job)
 
@@ -188,6 +204,7 @@ class Job(object):
         self.start_day = None  # Specific day of the week to start on
         self.tags = set()  # unique set of tags for the job
         self.scheduler = scheduler  # scheduler to register with
+        self.scheduled = True
 
     def __lt__(self, other):
         """
@@ -324,6 +341,13 @@ class Job(object):
         self.start_day = 'sunday'
         return self.weeks
 
+    @property
+    def first_of_month(self):
+        self.unit = 'months'
+        self.interval = 1
+        self.start_day = 1
+        return self
+
     def tag(self, *tags):
         """
         Tags the job with one or more unique indentifiers.
@@ -348,16 +372,26 @@ class Job(object):
         :param time_str: A string in `XX:YY` format.
         :return: The invoked job instance
         """
-        assert self.unit in ('days', 'hours') or self.start_day
         hour, minute = time_str.split(':')
         minute = int(minute)
-        if self.unit == 'days' or self.start_day:
-            hour = int(hour)
-            assert 0 <= hour <= 23
-        elif self.unit == 'hours':
-            hour = 0
+        hour = int(hour)
+        assert 0 <= hour <= 23
         assert 0 <= minute <= 59
         self.at_time = dt.time(hour, minute)
+        return self
+
+    def at_date(self, date_str):
+        """
+        Schedule the job every at a certain date.
+        Calling this is only valid for jobs scheduled to run
+        once.
+        :param date_str: A string in `YYYYY-MM-DD XX:YY` format.
+        :return: The invoked job instance
+        """
+        date = tz.localize(dt.datetime.strptime(date_str, '%Y-%m-%d %H:%M'))
+        self.start_day = date
+        self.unit = 'date'
+        self.interval = 1
         return self
 
     def to(self, latest):
@@ -403,7 +437,12 @@ class Job(object):
         """
         :return: ``True`` if the job should be run now.
         """
-        return now() >= self.next_run
+        if self.scheduled == False:
+            return False
+        
+        # Run jobs scheduled for the last minute, not before nor after.
+        ten_sec_ago = now() + relativedelta(seconds=-10)
+        return now() >= self.next_run >= ten_sec_ago
 
     def run(self):
         """
@@ -421,56 +460,74 @@ class Job(object):
         """
         Compute the instant when this job should run next.
         """
-        assert self.unit in ('seconds', 'minutes', 'hours', 'days', 'weeks')
+        if self.unit == 'date':
+            self.next_run = self.start_day
+            return
+        
+        interval = self.interval
+        
+        if self.last_run is not None:
+            self.last_run = tz.localize(self.last_run)
 
-        if self.latest is not None:
-            assert self.latest >= self.interval
-            interval = random.randint(self.interval, self.latest)
-        else:
-            interval = self.interval
+            if self.latest:
+                assert self.latest >= self.interval
+                interval = random.randint(self.interval, self.latest)
 
-        self.period = dt.timedelta(**{self.unit: interval})
+        assert self.unit in ('seconds', 'minutes', 'hours', 'days', 'weeks', 'months')  or self.start_day
+
+        self.period = relativedelta(**{self.unit: +interval})
+
         self.next_run = now() + self.period
-        if self.start_day is not None:
-            assert self.unit == 'weeks'
-            weekdays = (
-                'monday',
-                'tuesday',
-                'wednesday',
-                'thursday',
-                'friday',
-                'saturday',
-                'sunday'
-            )
-            assert self.start_day in weekdays
-            weekday = weekdays.index(self.start_day)
-            days_ahead = weekday - self.next_run.weekday()
-            if days_ahead <= 0:  # Target day already happened this week
-                days_ahead += 7
-            self.next_run += dt.timedelta(days_ahead) - self.period
+        
         if self.at_time is not None:
-            assert self.unit in ('days', 'hours') or self.start_day is not None
             kwargs = {
+                'hour': self.at_time.hour,
                 'minute': self.at_time.minute,
                 'second': self.at_time.second,
                 'microsecond': 0
             }
-            if self.unit == 'days' or self.start_day is not None:
-                kwargs['hour'] = self.at_time.hour
+
             self.next_run = self.next_run.replace(**kwargs)
             # If we are running for the first time, make sure we run
             # at the specified time *today* (or *this hour*) as well
             if not self.last_run:
-                now = now()
-                if (self.unit == 'days' and self.at_time > now.time() and
+                if (self.unit == 'days' and self.at_time > now().time() and
                         self.interval == 1):
                     self.next_run = self.next_run - dt.timedelta(days=1)
-                elif self.unit == 'hours' and self.at_time.minute > now.minute:
-                    self.next_run = self.next_run - dt.timedelta(hours=1)
-        if self.start_day is not None and self.at_time is not None:
-            # Let's see if we will still make that time we specified today
-            if (self.next_run - now()).days >= 7:
-                self.next_run -= self.period
+
+        if self.start_day is not None:
+            if self.unit == 'weeks':
+                weekdays = (
+                    'monday',
+                    'tuesday',
+                    'wednesday',
+                    'thursday',
+                    'friday',
+                    'saturday',
+                    'sunday'
+                )
+                assert self.start_day in weekdays
+                weekday = weekdays.index(self.start_day)
+                days_ahead = weekday - self.next_run.weekday()
+                if days_ahead <= 0:  # Target day already happened this week
+                    days_ahead += 7
+
+                self.next_run += dt.timedelta(days_ahead) - self.period
+                if self.at_time is not None:
+                    # Let's see if we will still make that time we specified today
+                    if (self.next_run - now()).days >= 7:
+                        self.next_run -= self.period
+
+            elif self.unit == 'months':
+                assert self.start_day == 1
+                delta = relativedelta(
+                    day=1, 
+                    months=+1, 
+                    hour=self.next_run.hour, 
+                    minute=self.next_run.minute, 
+                    second=self.next_run.second)
+                self.next_run = now() + delta
+            
 
 
 # The following methods are shortcuts for not having to
