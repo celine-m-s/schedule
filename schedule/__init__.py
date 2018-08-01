@@ -468,9 +468,7 @@ class Job(object):
         interval = self.interval
         
         if self.last_run is not None:
-            self.last_run = tz.localize(self.last_run)
-
-            if self.latest:
+            if self.latest is not None:
                 assert self.latest >= self.interval
                 interval = random.randint(self.interval, self.latest)
 
