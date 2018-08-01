@@ -43,7 +43,12 @@ import functools
 import logging
 import random
 
+
 logger = logging.getLogger('schedule')
+
+
+def now():
+    return dt.datetime.now()
 
 
 class CancelJob(object):
@@ -148,7 +153,7 @@ class Scheduler(object):
         :return: Number of seconds until
                  :meth:`next_run <Scheduler.next_run>`.
         """
-        return (self.next_run - dt.datetime.now()).total_seconds()
+        return (self.next_run - now()).total_seconds()
 
 
 class Job(object):
@@ -395,7 +400,7 @@ class Job(object):
         """
         :return: ``True`` if the job should be run now.
         """
-        return dt.datetime.now() >= self.next_run
+        return now() >= self.next_run
 
     def run(self):
         """
@@ -405,7 +410,7 @@ class Job(object):
         """
         logger.info('Running job %s', self)
         ret = self.job_func()
-        self.last_run = dt.datetime.now()
+        self.last_run = now()
         self._schedule_next_run()
         return ret
 
@@ -422,7 +427,7 @@ class Job(object):
             interval = self.interval
 
         self.period = dt.timedelta(**{self.unit: interval})
-        self.next_run = dt.datetime.now() + self.period
+        self.next_run = now() + self.period
         if self.start_day is not None:
             assert self.unit == 'weeks'
             weekdays = (
@@ -453,7 +458,7 @@ class Job(object):
             # If we are running for the first time, make sure we run
             # at the specified time *today* (or *this hour*) as well
             if not self.last_run:
-                now = dt.datetime.now()
+                now = now()
                 if (self.unit == 'days' and self.at_time > now.time() and
                         self.interval == 1):
                     self.next_run = self.next_run - dt.timedelta(days=1)
@@ -461,7 +466,7 @@ class Job(object):
                     self.next_run = self.next_run - dt.timedelta(hours=1)
         if self.start_day is not None and self.at_time is not None:
             # Let's see if we will still make that time we specified today
-            if (self.next_run - dt.datetime.now()).days >= 7:
+            if (self.next_run - now()).days >= 7:
                 self.next_run -= self.period
 
 
