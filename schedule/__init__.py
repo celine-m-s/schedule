@@ -142,7 +142,7 @@ class Scheduler(object):
         :param interval: A quantity of a certain time unit
         :return: An unconfigured :class:`Job <Job>`
         """
-        job = CustomJob(interval, self)
+        job = Job(interval, self)
         self.recurrence = 'once'
         return job
 
