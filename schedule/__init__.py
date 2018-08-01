@@ -43,12 +43,15 @@ import functools
 import logging
 import random
 
+from pytz import timezone
+
 
 logger = logging.getLogger('schedule')
+tz = timezone('Europe/Paris')
 
 
 def now():
-    return dt.datetime.now()
+    return dt.datetime.now(tz)
 
 
 class CancelJob(object):
