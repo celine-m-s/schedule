@@ -38,11 +38,10 @@ Usage:
 [3] https://adam.herokuapp.com/past/2010/6/30/replace_cron_with_clockwork/
 """
 import collections
-import datetime
+import datetime as dt
 import functools
 import logging
 import random
-import time
 
 logger = logging.getLogger('schedule')
 
@@ -149,7 +148,7 @@ class Scheduler(object):
         :return: Number of seconds until
                  :meth:`next_run <Scheduler.next_run>`.
         """
-        return (self.next_run - datetime.datetime.now()).total_seconds()
+        return (self.next_run - dt.datetime.now()).total_seconds()
 
 
 class Job(object):
@@ -350,7 +349,7 @@ class Job(object):
         elif self.unit == 'hours':
             hour = 0
         assert 0 <= minute <= 59
-        self.at_time = datetime.time(hour, minute)
+        self.at_time = dt.time(hour, minute)
         return self
 
     def to(self, latest):
@@ -396,7 +395,7 @@ class Job(object):
         """
         :return: ``True`` if the job should be run now.
         """
-        return datetime.datetime.now() >= self.next_run
+        return dt.datetime.now() >= self.next_run
 
     def run(self):
         """
@@ -406,7 +405,7 @@ class Job(object):
         """
         logger.info('Running job %s', self)
         ret = self.job_func()
-        self.last_run = datetime.datetime.now()
+        self.last_run = dt.datetime.now()
         self._schedule_next_run()
         return ret
 
@@ -422,8 +421,8 @@ class Job(object):
         else:
             interval = self.interval
 
-        self.period = datetime.timedelta(**{self.unit: interval})
-        self.next_run = datetime.datetime.now() + self.period
+        self.period = dt.timedelta(**{self.unit: interval})
+        self.next_run = dt.datetime.now() + self.period
         if self.start_day is not None:
             assert self.unit == 'weeks'
             weekdays = (
@@ -440,7 +439,7 @@ class Job(object):
             days_ahead = weekday - self.next_run.weekday()
             if days_ahead <= 0:  # Target day already happened this week
                 days_ahead += 7
-            self.next_run += datetime.timedelta(days_ahead) - self.period
+            self.next_run += dt.timedelta(days_ahead) - self.period
         if self.at_time is not None:
             assert self.unit in ('days', 'hours') or self.start_day is not None
             kwargs = {
@@ -454,15 +453,15 @@ class Job(object):
             # If we are running for the first time, make sure we run
             # at the specified time *today* (or *this hour*) as well
             if not self.last_run:
-                now = datetime.datetime.now()
+                now = dt.datetime.now()
                 if (self.unit == 'days' and self.at_time > now.time() and
                         self.interval == 1):
-                    self.next_run = self.next_run - datetime.timedelta(days=1)
+                    self.next_run = self.next_run - dt.timedelta(days=1)
                 elif self.unit == 'hours' and self.at_time.minute > now.minute:
-                    self.next_run = self.next_run - datetime.timedelta(hours=1)
+                    self.next_run = self.next_run - dt.timedelta(hours=1)
         if self.start_day is not None and self.at_time is not None:
             # Let's see if we will still make that time we specified today
-            if (self.next_run - datetime.datetime.now()).days >= 7:
+            if (self.next_run - dt.datetime.now()).days >= 7:
                 self.next_run -= self.period
 
 
